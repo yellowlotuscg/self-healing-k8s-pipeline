@@ -1,0 +1,19 @@
+# ClusterIP service - stable virtual IP in front of the 3 pods. Only routes to
+# pods that pass the readiness probe, which is the mechanism that lets a
+# not-ready pod sit out of rotation without dropping traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-svc
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: echo-svc
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

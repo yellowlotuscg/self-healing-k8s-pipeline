@@ -1,0 +1,16 @@
+# App config. Kept tiny - just the warmup window and app name. The point of
+# pulling these out is so I can demonstrate config changes without rebuilding
+# the image, and so the readiness warmup is auditable rather than hard-coded.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo-config
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+data:
+  APP_NAME: "echo-svc"
+  # 5s warmup before /ready flips healthy. This must stay <= the readiness
+  # probe's failureThreshold * periodSeconds budget so a fresh pod has time to
+  # warm up before the probe gives up on it.
+  READY_AFTER_SECONDS: "5"

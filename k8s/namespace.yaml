@@ -1,0 +1,14 @@
+# Dedicated namespace so the demo workload is isolated and I can apply
+# resource-quota / PSA labels in one place. The pod-security labels enforce the
+# "restricted" standard at admission time - this is the GRC side of me bleeding
+# into the k8s manifests, and it pairs with the non-root container in the
+# Dockerfile.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: echo
+  labels:
+    app.kubernetes.io/part-of: self-healing-demo
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
