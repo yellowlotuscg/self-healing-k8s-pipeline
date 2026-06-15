@@ -16,7 +16,7 @@ flowchart TB
     JNK["Jenkins on Kubernetes\n(ephemeral agent pods,\nEFS-backed PVC)"]
   end
 
-  subgraph Cluster["kind cluster (3 nodes) — EKS stand-in"]
+  subgraph Cluster["kind cluster (3 nodes), EKS stand-in"]
     direction TB
     ING["ingress-nginx\n(host :80/:443)"]
     SVC["Service echo-svc\n(ClusterIP)"]

@@ -9,7 +9,7 @@ makes them runnable and legible to someone who has five minutes.
 
 So the strategy is simple: take my two real incidents, reproduce the failure
 mode on a free local cluster, ship the correct fixes as code, and wrap it in the
-CI/CD + observability that would have prevented it — then document it like an
+CI/CD + observability that would have prevented it, then document it like an
 actual SRE post-mortem.
 
 ## Goals
@@ -41,7 +41,7 @@ actual SRE post-mortem.
 ## Non-goals
 
 - Not a production service. It's a teaching artifact.
-- Not multi-cloud or HA across regions — out of scope for a laptop demo.
+- Not multi-cloud or HA across regions; out of scope for a laptop demo.
 - No secrets management theater; demo creds are clearly marked as demo-only.
 
 ## Roadmap

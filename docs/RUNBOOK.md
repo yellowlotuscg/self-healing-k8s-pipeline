@@ -50,7 +50,7 @@ make smoke           # port-forwards and curls /, /health, /ready -> all 200
 make observability   # kube-prometheus-stack + ServiceMonitor + alerts + dashboard
 ```
 
-Open Grafana (creds admin/admin — demo only):
+Open Grafana (creds admin/admin, demo only):
 
 ```bash
 kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
@@ -87,7 +87,7 @@ kubectl describe nodes | grep -i pressure
 ```
 
 In Grafana the "Pod restarts (10m)" and "OOMKills" panels light up, and the
-`EchoPodRestartStorm` / `EchoOOMKilled` alerts move to Pending/Firing — i.e. the
+`EchoPodRestartStorm` / `EchoOOMKilled` alerts move to Pending/Firing, i.e. the
 alerts that *would have caught this in prod*.
 
 ## 5. Watch it self-heal

@@ -8,8 +8,8 @@ The 60-second version. If you only read one doc, read this one, then the
 A Kubernetes service tier (on EKS) went out with **no resource requests or
 limits** and a **liveness probe pointed at a heavy endpoint with a 1-second
 timeout**. Under peak traffic the scheduler had over-packed the nodes (pods that
-"cost nothing" get bin-packed hard), every pod grabbed memory at once — a
-**pod-scheduling stampede** — nodes hit `MemoryPressure`, the kubelet started
+"cost nothing" get bin-packed hard), every pod grabbed memory at once. This was a
+**pod-scheduling stampede**: nodes hit `MemoryPressure`, the kubelet started
 evicting, evicted pods rescheduled onto the next node and pushed it over too, and
 the tight liveness probe simultaneously **killed healthy-but-slow pods** into a
 `CrashLoopBackOff` storm. Two nodes went `NotReady`. ~25 min partial outage.
@@ -39,21 +39,21 @@ the tight liveness probe simultaneously **killed healthy-but-slow pods** into a
 A **self-healing Kubernetes CI/CD + observability demo** that runs free on a
 local `kind` cluster but mirrors the real EKS incident end to end:
 
-- **`app/`** — tiny FastAPI service with a proper `/health` vs `/ready` split
+- **`app/`**: tiny FastAPI service with a proper `/health` vs `/ready` split
   (the distinction that bit us), Prometheus `/metrics`, non-root container.
-- **`k8s/`** — the *fixed* manifests (right-sized resources, tuned probes, PDB,
-  HPA, topology spread) **and** `k8s/incident/` — the *broken* variant, so the
+- **`k8s/`**: the *fixed* manifests (right-sized resources, tuned probes, PDB,
+  HPA, topology spread) **and** `k8s/incident/`, the *broken* variant, so the
   post-mortem points at a runnable diff.
-- **`observability/`** — kube-prometheus-stack values, a ServiceMonitor, a
+- **`observability/`**: kube-prometheus-stack values, a ServiceMonitor, a
   Grafana dashboard, and the **alert rules that would have caught the stampede**
   (restart storms, OOMKills, readiness 503s, node memory pressure, replica floor).
-- **`terraform/`** — local kind cluster + monitoring stack as code (swap the
+- **`terraform/`**: local kind cluster + monitoring stack as code (swap the
   kind resource for the EKS module and it's the same shape).
-- **`ansible/`** — one playbook to install prereqs and bootstrap the whole thing.
-- **`ci/`** — GitHub Actions (lint/test/build/kind-smoke/manifest-validate) and a
+- **`ansible/`**: one playbook to install prereqs and bootstrap the whole thing.
+- **`ci/`**: GitHub Actions (lint/test/build/kind-smoke/manifest-validate) and a
   **Jenkinsfile** modeling the Jenkins-on-Kubernetes rebuild with the EFS-backed
   PVC.
-- **`docs/`** — this file, the [post-mortem](INCIDENT-POSTMORTEM.md),
+- **`docs/`**: this file, the [post-mortem](INCIDENT-POSTMORTEM.md),
   [architecture](ARCHITECTURE.md), [plan](PLAN.md), and an operational
   [runbook](RUNBOOK.md) for breaking it and watching it self-heal.
 

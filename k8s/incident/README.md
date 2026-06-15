@@ -1,4 +1,4 @@
-# k8s/incident/ — the broken variant
+# k8s/incident/: the broken variant
 
 This directory holds the deliberately-broken Deployment that reproduces the
 pod-scheduling stampede described in [`../../docs/INCIDENT-POSTMORTEM.md`](../../docs/INCIDENT-POSTMORTEM.md).

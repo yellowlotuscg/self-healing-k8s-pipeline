@@ -1,10 +1,12 @@
 # self-healing-k8s-pipeline
 
+A case study from Yellow Lotus Consulting Group demonstrating Kubernetes reliability and DevOps engineering, reproduced on a local cluster (not a live production system, not client data).
+
 A self-healing Kubernetes CI/CD + observability demo that runs **free on a local
 `kind` cluster**, but is a faithful reconstruction of a real EKS reliability
 incident I worked: a pod-scheduling stampede that cascaded into node failures,
 plus the Jenkins-on-Kubernetes rebuild that closed an earlier CI/CD gap. I broke
-it, fixed it, and built the controls that would have prevented it — and you can
+it, fixed it, and built the controls that would have prevented it, and you can
 run the whole thing.
 
 ## Broke / Fixed / Built (read this first)
@@ -15,10 +17,10 @@ run the whole thing.
   kubelet evictions → evicted pods rescheduled onto the next node and pushed it
   over → cascading node failures, while the tight liveness probe **killed
   healthy-but-slow pods** into a `CrashLoopBackOff` storm.
-- **Fixed:** right-sized requests/limits (scheduler stops overpacking — the
+- **Fixed:** right-sized requests/limits (scheduler stops overpacking, the
   actual fix), re-pointed/loosened probes (+startupProbe), added a
   **PodDisruptionBudget**, topology spread, and a `maxUnavailable: 0` rollout.
-- **Built:** this repo — app, good *and* broken manifests, Prometheus/Grafana +
+- **Built:** this repo: app, good *and* broken manifests, Prometheus/Grafana +
   the alerts that would have caught it, Terraform, Ansible, GitHub Actions, and a
   Jenkinsfile modeling the EFS-backed Jenkins-on-k8s rebuild.
 
@@ -45,7 +47,7 @@ Full diagram (mermaid) + data flow + prod deltas:
 
 - Docker (running), `kind`, `kubectl` (v1.31+), `helm`
 - Or let Ansible install them: `ansible-playbook -i ansible/inventory.ini ansible/bootstrap.yml --tags prereqs`
-- **None of the above** if you only want to validate the repo — see
+- **None of the above** if you only want to validate the repo. See
   "Validated without a cluster" below.
 
 ## Quick start (live run)
@@ -91,7 +93,7 @@ Makefile            cluster-up / deploy / observability / break / heal / smoke /
 | Monitoring & alert design (Prometheus/Grafana/Datadog-style) | `observability/` |
 | Terraform IaC | `terraform/` |
 | Ansible config management | `ansible/` |
-| CI/CD — GitHub Actions + Jenkins-on-k8s w/ EFS-backed storage | `ci/` |
+| CI/CD: GitHub Actions + Jenkins-on-k8s w/ EFS-backed storage | `ci/` |
 | Security/GRC habits (non-root, PSA restricted, least privilege) | `app/Dockerfile`, `k8s/namespace.yaml`, `k8s/deployment.yaml` |
 
 Full mapping + roadmap: [`docs/PLAN.md`](docs/PLAN.md).
@@ -109,8 +111,8 @@ run live via the documented steps **and** statically validated with no cluster:
   to the API server for the API group list, so it isn't actually clusterless.
 - CRD-based manifests (`ServiceMonitor`, `PrometheusRule`) are parse-validated
   only, since strict schema validation needs the prometheus-operator CRDs
-  installed — noted as such.
-- The app's own unit tests (`app/test_main.py`) pass — 5/5, covering the
+  installed, noted as such.
+- The app's own unit tests (`app/test_main.py`) pass, 5/5, covering the
   probe contract that caused the incident.
 - Terraform is **validated by review** (provider pins, single-apply wiring), as
   `terraform` isn't installed here.
@@ -125,4 +127,4 @@ make validate
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
