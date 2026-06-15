@@ -1,0 +1,25 @@
+# ----------------------------------------------------------------------------
+# PodDisruptionBudget - added directly because of the stampede lesson.
+#
+# A PDB only governs VOLUNTARY disruptions (node drains, cluster upgrades,
+# `kubectl drain`). It does NOT stop involuntary evictions from memory pressure
+# - the resource requests do that. But during the incident, an automated node
+# rollout drained nodes on top of the memory-pressure evictions and there was
+# no floor, so we briefly went to zero healthy pods.
+#
+# minAvailable: 2 of 3 means a drain has to wait until the cluster can keep 2
+# echo-svc pods serving. With maxUnavailable:0 on the Deployment rollout, the
+# two mechanisms together guarantee we never voluntarily dip below 2.
+# ----------------------------------------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: echo-svc
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: echo-svc

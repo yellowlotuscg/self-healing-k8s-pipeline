@@ -1,0 +1,144 @@
+# ----------------------------------------------------------------------------
+# echo-svc Deployment - the FIXED version.
+#
+# This is the manifest after the post-mortem. Read docs/INCIDENT-POSTMORTEM.md
+# for the full story; the short version is in the comments inline so the diff
+# against k8s/incident/deployment-bad.yaml tells the story on its own.
+#
+# The three things that actually fixed the cascading EKS node failures:
+#   1. Right-sized resource requests AND limits (was: none).
+#   2. Tuned readiness + liveness probes that don't kill slow-but-healthy pods.
+#   3. A PodDisruptionBudget (separate file) so voluntary disruptions can't
+#      drain us below a safe replica count.
+# ----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-svc
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+    app.kubernetes.io/part-of: self-healing-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: echo-svc
+  # RollingUpdate with surge capped and unavailable at 0 so a rollout never
+  # drops us below the running replica count - this plus the PDB is what stops
+  # a deploy from turning into an outage.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: echo-svc
+        app.kubernetes.io/part-of: self-healing-demo
+    spec:
+      # Spread pods across nodes so a single node dying can't take the whole
+      # service with it. During the incident every pod had landed on the same
+      # two hot nodes, which is part of why the eviction cascade hurt so much.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: echo-svc
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: echo-svc
+          image: echo-svc:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: echo-config
+          # ----------------------------------------------------------------
+          # RESOURCES - the single most important change.
+          #
+          # BEFORE (incident): no requests, no limits. With no requests the
+          # scheduler treats the pod as needing ~0 memory, so it happily packs
+          # dozens onto a node. Under load they all grabbed real memory at once
+          # (a "scheduling stampede"), the node hit memory pressure, the
+          # kubelet started evicting, evicted pods rescheduled onto the next
+          # node, and the pressure rolled across the cluster -> cascading node
+          # failures + CrashLoopBackOff.
+          #
+          # AFTER (this): requests reflect real steady-state usage measured from
+          # Prometheus (container_memory_working_set_bytes p95 ~80Mi, CPU ~50m).
+          # The request is what the scheduler reserves; the limit is the
+          # blast-radius cap. limit/request kept ~2x so we tolerate bursts
+          # without becoming a memory hog. Now the scheduler refuses to
+          # overpack a node, which is the whole fix.
+          # ----------------------------------------------------------------
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "250m"
+              memory: "192Mi"
+          # ----------------------------------------------------------------
+          # READINESS probe - "should this pod get traffic?"
+          # initialDelay 3s + 5s warmup gives the app time to warm before we
+          # even ask. failureThreshold 3 * periodSeconds 5 = 15s of grace
+          # before we pull it from the Service endpoints. It does NOT restart
+          # the pod - it just stops sending traffic, which is exactly what you
+          # want for a slow-but-alive pod.
+          # ----------------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+          # ----------------------------------------------------------------
+          # LIVENESS probe - "is this process wedged and needs a restart?"
+          #
+          # BEFORE (incident): liveness pointed at a heavy endpoint with a 1s
+          # timeout and failureThreshold 1. Under memory pressure the app got
+          # slow, liveness timed out, the kubelet KILLED healthy pods, they
+          # rescheduled, and we made the stampede worse. Liveness was doing
+          # readiness's job.
+          #
+          # AFTER (this): liveness hits the cheap /health endpoint only, with a
+          # generous initialDelay (30s) so it never races startup, and
+          # failureThreshold 3 so one slow scrape doesn't kill anything. A
+          # restart now means "genuinely wedged," not "busy."
+          # ----------------------------------------------------------------
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          # Startup probe protects slow cold starts from the liveness probe
+          # entirely - up to 30 * 2s = 60s to come up before liveness engages.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

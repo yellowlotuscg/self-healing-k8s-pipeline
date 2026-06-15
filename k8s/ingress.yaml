@@ -1,0 +1,26 @@
+# Optional Ingress for the kind demo. Assumes the ingress-nginx controller is
+# installed (the kind config in terraform/ maps host ports 80/443 to it).
+# Hit it with:  curl -H "Host: echo.local" http://localhost/
+# or add `127.0.0.1 echo.local` to /etc/hosts and browse to http://echo.local/
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echo-svc
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: echo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: echo-svc
+                port:
+                  number: 80
