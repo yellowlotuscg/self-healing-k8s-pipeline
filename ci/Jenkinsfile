@@ -1,0 +1,156 @@
+// ===========================================================================
+// Jenkins declarative pipeline - Jenkins-on-Kubernetes.
+//
+// This mirrors incident #1 from the post-mortem: we had a CI/CD gap when the
+// old standalone Jenkins box's workspace volume filled and a build outage took
+// the pipeline down with it. I rebuilt Jenkins to run ON Kubernetes with the
+// Kubernetes plugin (ephemeral agent pods) and EFS-backed persistent storage
+// for the Jenkins home + shared build cache, so no single node's disk is a SPOF.
+//
+// In this LOCAL kind demo there's no EFS, so the PVC below binds to the
+// 'standard' StorageClass (kind's local-path provisioner) instead. On EKS the
+// SAME PVC binds to an efs-sc StorageClass backed by the EFS CSI driver - that
+// is the only line that changes between local and prod. The comment on the PVC
+// spells this out.
+//
+// The agent runs as a pod (kubernetes agent block), which is the whole point:
+// builds are stateless and ephemeral; only the PVC persists.
+// ===========================================================================
+
+pipeline {
+  // Each build gets a fresh agent POD in the cluster. Two containers: one to
+  // build/test python, one with kubectl for deploys. This is exactly the
+  // "Jenkins on Kubernetes" model from the rebuild.
+  agent {
+    kubernetes {
+      defaultContainer 'python'
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: python
+      image: python:3.12-slim
+      command: ["cat"]
+      tty: true
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "512Mi"
+      volumeMounts:
+        - name: build-cache
+          mountPath: /cache
+    - name: kubectl
+      image: bitnami/kubectl:1.31
+      command: ["cat"]
+      tty: true
+  volumes:
+    # ---------------------------------------------------------------------
+    # Persistent build cache. THIS is the EFS-backed storage from incident #1.
+    #   - On EKS: claimName binds to a PVC using StorageClass "efs-sc"
+    #     (EFS CSI driver, ReadWriteMany) so every agent pod shares the cache
+    #     and Jenkins home survives any node dying.
+    #   - In this kind demo: the same claim binds to "standard" (local-path),
+    #     ReadWriteOnce. See ci/jenkins-pvc.yaml.
+    # ---------------------------------------------------------------------
+    - name: build-cache
+      persistentVolumeClaim:
+        claimName: jenkins-build-cache
+'''
+    }
+  }
+
+  options {
+    timestamps()
+    timeout(time: 30, unit: 'MINUTES')
+    disableConcurrentBuilds()
+  }
+
+  environment {
+    IMAGE = "echo-svc:${env.BUILD_NUMBER}"
+    PIP_CACHE_DIR = "/cache/pip"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Install & Lint') {
+      steps {
+        sh '''
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          python -m compileall app
+        '''
+      }
+    }
+
+    stage('Unit tests') {
+      steps {
+        sh 'pytest -q'
+      }
+    }
+
+    // We can't run dockerd inside the agent pod in this demo, so image build is
+    // shown as the step you'd wire to Kaniko / BuildKit on a real cluster.
+    // Commented real-world command kept for honesty about the gap.
+    stage('Build image') {
+      steps {
+        echo "Would build ${IMAGE} via Kaniko (rootless, no docker daemon on the agent)."
+        // sh 'executor --context=dir://${WORKSPACE}/app --destination=$REGISTRY/${IMAGE}'
+      }
+    }
+
+    stage('Validate manifests') {
+      steps {
+        container('kubectl') {
+          sh '''
+            kubectl apply --dry-run=client -f k8s/namespace.yaml
+            kubectl apply --dry-run=client -f k8s/configmap.yaml
+            kubectl apply --dry-run=client -f k8s/deployment.yaml
+            kubectl apply --dry-run=client -f k8s/service.yaml
+            kubectl apply --dry-run=client -f k8s/pdb.yaml
+            kubectl apply --dry-run=client -f k8s/hpa.yaml
+          '''
+        }
+      }
+    }
+
+    stage('Deploy') {
+      // Only deploy from main - PRs stop at validation.
+      when { branch 'main' }
+      steps {
+        container('kubectl') {
+          sh '''
+            kubectl apply -f k8s/
+            kubectl -n echo rollout status deploy/echo-svc --timeout=120s
+          '''
+        }
+      }
+    }
+
+    stage('Smoke test') {
+      when { branch 'main' }
+      steps {
+        container('kubectl') {
+          sh 'NS=echo bash scripts/smoke.sh'
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "Build ${env.BUILD_NUMBER} finished: ${currentBuild.currentResult}"
+    }
+    failure {
+      echo "FAILED - check the rollout and probe config before retrying."
+    }
+  }
+}

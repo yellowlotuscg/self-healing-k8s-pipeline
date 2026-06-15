@@ -1,0 +1,32 @@
+# PVC for the Jenkins build cache / Jenkins home referenced by the Jenkinsfile.
+#
+# This is the heart of incident #1's fix: persistent storage that does NOT live
+# on any single build node.
+#
+#   PROD (EKS):  storageClassName: efs-sc, accessModes: [ReadWriteMany]
+#                -> EFS CSI driver, shared across all ephemeral agent pods,
+#                   survives node loss. That's what closed the CI/CD gap.
+#
+#   DEMO (kind): storageClassName: standard, accessModes: [ReadWriteOnce]
+#                -> kind's built-in local-path provisioner. Same manifest shape,
+#                   just a different StorageClass. The ONLY line that differs
+#                   between local and prod is storageClassName (+ access mode).
+#
+# Apply before running the Jenkins pipeline:  kubectl apply -f ci/jenkins-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-build-cache
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: jenkins
+    app.kubernetes.io/component: build-cache
+spec:
+  # DEMO value. For EKS swap to ReadWriteMany.
+  accessModes:
+    - ReadWriteOnce
+  # DEMO value. For EKS: efs-sc
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 2Gi
