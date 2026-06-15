@@ -1,0 +1,78 @@
+# ############################################################################
+# THE "BAD" DEPLOYMENT - this reproduces the incident on purpose.
+#
+# Do NOT copy this into anything real. It is here so the post-mortem can point
+# at an exact, runnable diff against ../deployment.yaml. `make break` applies
+# this; `make heal` re-applies the good one.
+#
+# Everything wrong here is something I actually shipped (or inherited) before
+# the EKS stampede. Each problem is called out with a "BUG:" comment.
+#
+# Reproduce the diff:
+#   diff -u k8s/deployment.yaml k8s/incident/deployment-bad.yaml
+# ############################################################################
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-svc
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+    app.kubernetes.io/part-of: self-healing-demo
+    variant: incident-bad
+spec:
+  # BUG: cranked replicas with no resource requests = instant scheduling
+  # stampede. The scheduler thinks each pod costs nothing and crams them on.
+  replicas: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: echo-svc
+  # BUG: maxUnavailable lets the rollout itself drop healthy capacity, and
+  # there's no PDB to stop a drain. Rollouts became outages.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 4
+      maxUnavailable: 50%
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: echo-svc
+        app.kubernetes.io/part-of: self-healing-demo
+        variant: incident-bad
+    spec:
+      # BUG: no topology spread - pods pile onto whatever nodes the scheduler
+      # picks first, concentrating the memory pressure.
+      containers:
+        - name: echo-svc
+          image: echo-svc:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: echo-config
+          # BUG: NO resources block at all. No requests -> scheduler overpacks.
+          # No limits -> a single pod can eat the whole node. This one omission
+          # is the root cause of the cascading node failures.
+          #
+          # (intentionally empty: there is no `resources:` here)
+          #
+          # BUG: liveness probe is doing readiness's job AND is brutally tight.
+          # /ready is the wrong target for liveness (it returns 503 during
+          # warmup and under load), timeout 1s + failureThreshold 1 means a
+          # single slow response KILLS the pod. Under memory pressure every pod
+          # got slow at once, so the kubelet started killing healthy pods en
+          # masse -> CrashLoopBackOff storm that amplified the stampede.
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 1
+          # BUG: no readiness probe means the Service sends traffic to pods that
+          # haven't warmed up yet -> user-facing 503s during every rollout and
+          # every scale-up.
