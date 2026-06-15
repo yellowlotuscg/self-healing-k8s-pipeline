@@ -1,0 +1,95 @@
+# PrometheusRule - the alerts that WOULD HAVE CAUGHT the stampede.
+#
+# Each alert here maps to a specific failure mode from the post-mortem. If
+# these had existed before the incident, we'd have paged on the restart storm
+# and the OOMKills minutes in, instead of finding out from the cascading node
+# NotReady alerts after the blast radius had spread.
+#
+# CRD from prometheus-operator (monitoring.coreos.com/v1). YAML parses under
+# client validation; full validation needs the stack installed.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: echo-svc-reliability
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: echo-svc.reliability
+      rules:
+        # --- Pod restart storm: the leading indicator we missed ---
+        - alert: EchoPodRestartStorm
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="echo"}[10m]) > 3
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "echo-svc pod restarting repeatedly ({{ $labels.pod }})"
+            description: >
+              {{ $labels.pod }} restarted more than 3 times in 10m. During the
+              stampede this was the canary - tight liveness probes killing
+              slow-but-alive pods. Check liveness probe config and node memory.
+
+        # --- OOMKilled: pods hitting the memory ceiling ---
+        - alert: EchoOOMKilled
+          expr: |
+            increase(kube_pod_container_status_last_terminated_reason{namespace="echo",reason="OOMKilled"}[10m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "echo-svc container OOMKilled ({{ $labels.pod }})"
+            description: >
+              A container was OOMKilled. Either the memory limit is too low or
+              there's a leak. In the incident this fired across many pods at
+              once because there were no requests/limits and the node ran out.
+
+        # --- Readiness failing: pods serving 503 on /ready ---
+        - alert: EchoReadinessFailing
+          expr: |
+            sum(rate(echo_requests_total{path="/ready",status="503"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "echo-svc readiness probe returning 503"
+            description: >
+              /ready is returning 503 for 5m+. Pods are up but pulled from
+              rotation. Expected briefly during rollout; sustained means a
+              warmup/dependency problem.
+
+        # --- Node memory pressure: the thing that actually cascaded ---
+        - alert: EchoNodeMemoryPressure
+          expr: |
+            kube_node_status_condition{condition="MemoryPressure",status="true"} == 1
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Node under MemoryPressure ({{ $labels.node }})"
+            description: >
+              A node is reporting MemoryPressure. This is what kicked off the
+              eviction cascade. With right-sized requests the scheduler should
+              prevent overpacking - if this fires, check for pods without
+              requests.
+
+        # --- Not enough ready replicas (PDB floor at risk) ---
+        - alert: EchoInsufficientReadyReplicas
+          expr: |
+            kube_deployment_status_replicas_available{namespace="echo",deployment="echo-svc"} < 2
+          for: 3m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "echo-svc below 2 available replicas"
+            description: >
+              Available replicas dropped below the PDB floor of 2. We are one
+              disruption away from an outage.

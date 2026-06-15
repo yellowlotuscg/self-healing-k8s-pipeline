@@ -1,0 +1,27 @@
+# ServiceMonitor tells the kube-prometheus-stack Prometheus to scrape echo-svc.
+# This is a CRD from the prometheus-operator, so `kubectl --dry-run=client`
+# can't fully validate it without the CRD installed in a cluster - it will
+# still confirm the YAML parses. On a live cluster install the stack first
+# (see observability/values-kube-prometheus-stack.yaml).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: echo-svc
+  namespace: echo
+  labels:
+    app.kubernetes.io/name: echo-svc
+    # The stack's Prometheus is configured to select ServiceMonitors with this
+    # label (release name of the helm chart). Adjust if you name yours
+    # differently.
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: echo-svc
+  namespaceSelector:
+    matchNames:
+      - echo
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

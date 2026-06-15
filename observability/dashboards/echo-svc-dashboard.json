@@ -1,0 +1,108 @@
+{
+  "annotations": { "list": [] },
+  "title": "echo-svc / self-healing demo",
+  "uid": "echo-svc-selfheal",
+  "tags": ["echo-svc", "self-healing", "demo"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate by path",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (path) (rate(echo_requests_total{namespace=\"echo\"}[1m]))",
+          "legendFormat": "{{path}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Readiness 503s (pulled from rotation)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(echo_requests_total{path=\"/ready\",status=\"503\"}[1m]))",
+          "legendFormat": "ready 503/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Pod restarts (10m increase) - the stampede canary",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"echo\"}[10m]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Memory working set vs limit",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"echo\",container=\"echo-svc\"})",
+          "legendFormat": "{{pod}} working set",
+          "refId": "A"
+        },
+        {
+          "expr": "max(kube_pod_container_resource_limits{namespace=\"echo\",container=\"echo-svc\",resource=\"memory\"})",
+          "legendFormat": "memory limit",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Available vs desired replicas (PDB floor = 2)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "kube_deployment_status_replicas_available{namespace=\"echo\",deployment=\"echo-svc\"}",
+          "legendFormat": "available",
+          "refId": "A"
+        },
+        {
+          "expr": "kube_deployment_spec_replicas{namespace=\"echo\",deployment=\"echo-svc\"}",
+          "legendFormat": "desired",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "OOMKills (10m increase)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(increase(kube_pod_container_status_last_terminated_reason{namespace=\"echo\",reason=\"OOMKilled\"}[10m]))",
+          "legendFormat": "oomkills",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

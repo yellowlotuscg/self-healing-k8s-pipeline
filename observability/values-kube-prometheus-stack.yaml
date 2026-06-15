@@ -1,0 +1,71 @@
+# Helm values for the prometheus-community/kube-prometheus-stack chart.
+# Tuned for a local kind cluster: small footprint, no persistence (data is
+# disposable in the demo), and Grafana reachable via port-forward.
+#
+# Install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   helm upgrade --install kube-prometheus-stack \
+#     prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace \
+#     -f observability/values-kube-prometheus-stack.yaml
+#
+# (The Ansible playbook and `make observability` do this for you.)
+
+fullnameOverride: kube-prometheus-stack
+
+# Let Prometheus discover ServiceMonitors/PrometheusRules in ALL namespaces
+# regardless of the chart's default label selector, so the echo namespace's
+# CRs get picked up without extra wiring.
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    # Small retention + no PVC: this is a laptop, not prod.
+    retention: 6h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+
+grafana:
+  # Demo creds only - fine for localhost kind, never do this anywhere real.
+  adminPassword: "admin"
+  defaultDashboardsEnabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  # Auto-import the echo-svc dashboard from a ConfigMap labeled grafana_dashboard.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+
+# alertmanager kept on with tiny resources so the alert rules have somewhere to
+# fire. No real receivers wired - it's a demo.
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+# Trim components we don't need on a single-node kind cluster to keep it light.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
