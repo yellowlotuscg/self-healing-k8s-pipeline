@@ -1,0 +1,114 @@
+---
+# ============================================================================
+# bootstrap.yml - install local prerequisites and bring up the demo.
+#
+# Mirrors how I've used Ansible to make environments reproducible: instead of a
+# README full of "now brew install this", the playbook is the source of truth.
+# Runs against localhost (this Mac). Idempotent - safe to re-run.
+#
+#   ansible-playbook -i inventory.ini bootstrap.yml
+#
+# Tags let you run pieces independently, e.g. just the cluster:
+#   ansible-playbook -i inventory.ini bootstrap.yml --tags cluster
+# ============================================================================
+- name: Bootstrap the self-healing k8s demo on macOS
+  hosts: local
+  gather_facts: true
+
+  vars:
+    cluster_name: self-healing-demo
+    monitoring_namespace: monitoring
+    repo_root: "{{ playbook_dir }}/.."
+    # Pin the kind node image so everyone gets the same kubernetes version.
+    kind_node_image: "kindest/node:v1.31.0"
+
+  tasks:
+    # ---- Prerequisites via Homebrew ------------------------------------
+    - name: Ensure Homebrew CLI tooling is installed
+      community.general.homebrew:
+        name:
+          - kind
+          - kubernetes-cli   # kubectl
+          - helm
+        state: present
+      tags: [prereqs]
+
+    # ---- Cluster -------------------------------------------------------
+    - name: Check whether the kind cluster already exists
+      ansible.builtin.command: kind get clusters
+      register: kind_clusters
+      changed_when: false
+      tags: [cluster]
+
+    - name: Create the kind cluster (3 nodes, ingress-ready)
+      ansible.builtin.command: >
+        kind create cluster
+        --name {{ cluster_name }}
+        --image {{ kind_node_image }}
+        --config {{ repo_root }}/scripts/kind-config.yaml
+      when: cluster_name not in kind_clusters.stdout_lines
+      tags: [cluster]
+
+    - name: Point kubectl at the new cluster context
+      ansible.builtin.command: kubectl cluster-info --context kind-{{ cluster_name }}
+      changed_when: false
+      tags: [cluster]
+
+    # ---- ingress-nginx (so the Ingress works) --------------------------
+    - name: Install ingress-nginx for kind
+      ansible.builtin.command: >
+        kubectl apply
+        -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+      register: ingress_apply
+      changed_when: "'created' in ingress_apply.stdout"
+      tags: [ingress]
+
+    - name: Wait for ingress-nginx controller to be ready
+      ansible.builtin.command: >
+        kubectl wait --namespace ingress-nginx
+        --for=condition=Ready pod
+        --selector=app.kubernetes.io/component=controller
+        --timeout=180s
+      changed_when: false
+      tags: [ingress]
+
+    # ---- Observability: kube-prometheus-stack via Helm -----------------
+    - name: Add prometheus-community Helm repo
+      kubernetes.core.helm_repository:
+        name: prometheus-community
+        repo_url: https://prometheus-community.github.io/helm-charts
+      tags: [observability]
+
+    - name: Install/upgrade kube-prometheus-stack
+      kubernetes.core.helm:
+        name: kube-prometheus-stack
+        chart_ref: prometheus-community/kube-prometheus-stack
+        release_namespace: "{{ monitoring_namespace }}"
+        create_namespace: true
+        values_files:
+          - "{{ repo_root }}/observability/values-kube-prometheus-stack.yaml"
+        wait: true
+        timeout: 10m
+      tags: [observability]
+
+    # ---- Deploy the app + reliability manifests ------------------------
+    - name: Apply the (good) app manifests
+      ansible.builtin.command: kubectl apply -f {{ repo_root }}/k8s/
+      register: app_apply
+      changed_when: "'created' in app_apply.stdout or 'configured' in app_apply.stdout"
+      tags: [deploy]
+
+    - name: Apply the ServiceMonitor and alert rules
+      ansible.builtin.command: >
+        kubectl apply
+        -f {{ repo_root }}/observability/servicemonitor.yaml
+        -f {{ repo_root }}/observability/prometheus-rules.yaml
+      register: obs_apply
+      changed_when: "'created' in obs_apply.stdout or 'configured' in obs_apply.stdout"
+      tags: [deploy]
+
+    - name: Wait for echo-svc rollout to complete
+      ansible.builtin.command: >
+        kubectl -n echo rollout status deploy/echo-svc --timeout=120s
+      changed_when: false
+      tags: [deploy]
