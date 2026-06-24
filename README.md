@@ -1,6 +1,6 @@
 # self-healing-k8s-pipeline
 
-A case study from Yellow Lotus Consulting Group demonstrating Kubernetes reliability and DevOps engineering, reproduced on a local cluster (not a live production system, not client data).
+A case study from [Yellow Lotus Consulting Group](https://yellowlotuscg.com) demonstrating Kubernetes reliability and DevOps engineering, reproduced on a local cluster (not a live production system, not client data).
 
 A self-healing Kubernetes CI/CD + observability demo that runs **free on a local
 `kind` cluster**, but is a faithful reconstruction of a real EKS reliability
